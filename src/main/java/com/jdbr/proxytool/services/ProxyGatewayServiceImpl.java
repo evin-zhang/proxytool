@@ -1,4 +1,4 @@
-package com.jdbr.proxytool;
+package com.jdbr.proxytool.services;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
@@ -9,16 +9,15 @@ import reactor.extra.processor.TopicProcessor;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import java.time.Duration;
-import com.jdbr.proxytool.ProxyConfig;
+import com.jdbr.proxytool.config.ProxyConfig;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.http.MediaType;
-import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.BodyInserters;
 
 
 @Component
-public class ProxyGateway {
+public class ProxyGatewayServiceImpl {
     private static final int CACHE_EXPIRATION_MINUTES = 10;
     private final Cache<String, Object> cache;
     private final TopicProcessor<String> cacheInvalidationProcessor;
@@ -26,7 +25,7 @@ public class ProxyGateway {
     private final WebClient webClient;
 
     @Autowired
-    public ProxyGateway(ProxyConfig proxyConfig) {
+    public ProxyGatewayServiceImpl(ProxyConfig proxyConfig) {
         this.proxyConfig = proxyConfig;
         this.cache = Caffeine.newBuilder()
                 .expireAfterWrite(Duration.ofMinutes(CACHE_EXPIRATION_MINUTES))
