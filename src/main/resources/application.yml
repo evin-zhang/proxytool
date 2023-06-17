@@ -1,4 +1,12 @@
 proxy-tool:  
   routes: 
-    wpc: https://192.168.100.103
-    brs: https://192.168.100.102
+    "wpc":
+      host: https://192.168.100.103
+      needProxy:
+      proxyHost: null
+      proxyPort:
+    "brs":
+      host: https://192.168.100.103
+      needProxy:
+      proxyHost: null
+      proxyPort:

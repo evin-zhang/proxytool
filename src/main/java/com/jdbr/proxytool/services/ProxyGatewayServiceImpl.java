@@ -1,26 +1,35 @@
 package com.jdbr.proxytool.services;
 
+import com.jdbr.proxytool.config.Target;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.stereotype.Component;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
-import reactor.extra.processor.TopicProcessor;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+
+import java.nio.charset.Charset;
 import java.time.Duration;
+import java.util.Objects;
+
 import com.jdbr.proxytool.config.ProxyConfig;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.BodyInserters;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.transport.ProxyProvider;
 
 
 @Component
-public class ProxyGatewayServiceImpl {
+public class ProxyGatewayServiceImpl implements ProxyGatewayService {
     private static final int CACHE_EXPIRATION_MINUTES = 10;
-    private final Cache<String, Object> cache;
-    private final TopicProcessor<String> cacheInvalidationProcessor;
+    private final Cache<String, String> cache;
     private final ProxyConfig proxyConfig;
     private final WebClient webClient;
 
@@ -30,12 +39,16 @@ public class ProxyGatewayServiceImpl {
         this.cache = Caffeine.newBuilder()
                 .expireAfterWrite(Duration.ofMinutes(CACHE_EXPIRATION_MINUTES))
                 .build();
-        this.cacheInvalidationProcessor = TopicProcessor.<String>builder().name("cache-invalidation-processor").build();
-        this.webClient = WebClient.builder()
+        this.webClient = createWebClient();
+    }
+
+    private WebClient createWebClient() {
+        return WebClient.builder()
                 .filter(logRequest())
                 .build();
     }
-    public Mono<ResponseEntity<Object>> proxyRequest(String apiPath, HttpMethod httpMethod, String requestBody, String cacheHeaderValue) {
+
+    public Mono<ResponseEntity<String>> proxyRequest(String apiPath, HttpHeaders requestHeaders, MultiValueMap<String, String> params, String targetSystemName, HttpMethod httpMethod, String requestBody, String cacheHeaderValue) {
         String requestKey = generateRequestKey(apiPath, httpMethod, requestBody);
         boolean shouldCache = shouldCacheResponse(cacheHeaderValue);
 
@@ -45,7 +58,7 @@ public class ProxyGatewayServiceImpl {
         }
 
         // Forward request to target system and get response
-        Mono<ResponseEntity<Object>> responseMono = forwardRequestToTargetSystem(apiPath, httpMethod, requestBody);
+        Mono<ResponseEntity<String>> responseMono = forwardRequestToTargetSystem(apiPath, targetSystemName, httpMethod, requestBody, requestHeaders, params);
 
         // Cache response if necessary
         if (shouldCache) {
@@ -57,29 +70,52 @@ public class ProxyGatewayServiceImpl {
 
     private String generateRequestKey(String apiPath, HttpMethod httpMethod, String requestBody) {
         String key;
-        if (httpMethod == HttpMethod.GET) {
-            key = apiPath.hashCode() + "";
-        } else {
+        if (httpMethod == HttpMethod.POST) {
             String payloadHash = Integer.toString(apiPath.hashCode()) + "_" + Integer.toString(requestBody.hashCode());
             key = apiPath.hashCode() + "_" + payloadHash;
+        } else {
+            key = apiPath.hashCode() + "";
+
+
         }
         return key;
     }
 
-  
+
     private boolean shouldCacheResponse(String cacheHeaderValue) {
         return !"N".equalsIgnoreCase(cacheHeaderValue);
     }
-    public Mono<ResponseEntity<Object>> forwardRequestToTargetSystem(String apiPath, HttpMethod httpMethod, String requestBody) {
-        String targetSystemName = extractTargetSystemName(apiPath);
-        String targetUrl = getTargetUrl(targetSystemName) + apiPath;
 
-        return webClient.method(httpMethod)
-                .uri(targetUrl)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(BodyInserters.fromValue(requestBody))
-                .retrieve()
-                .toEntity(Object.class);
+    public Mono<ResponseEntity<String>> forwardRequestToTargetSystem(String apiPath, String targetSystemName, HttpMethod httpMethod, String requestBody, HttpHeaders httpHeaders, MultiValueMap<String, String> params) {
+
+        Target target = getTargetUrl(targetSystemName);
+        if (!Objects.isNull(target)) {
+            String targetUrl = UriComponentsBuilder.fromUriString(target.getHost() + apiPath).queryParams(params).toUriString();
+            String needProxy = target.getNeedProxy();
+            if ("Y".equals(needProxy)) {
+                final ReactorClientHttpConnector connector =
+                        new ReactorClientHttpConnector(HttpClient.create()
+                                .proxy(proxy -> proxy.type(ProxyProvider.Proxy.HTTP).host(target.getProxyHost()).port(Integer.parseInt(target.getProxyPort()))));
+                WebClient.RequestBodySpec requestBodySpec = WebClient.builder().filter(logRequest()).clientConnector(connector).build().method(httpMethod).uri(targetUrl).acceptCharset(Charset.forName("UTF-8"))
+                        .accept(MediaType.APPLICATION_XML, MediaType.APPLICATION_XML).headers(headers -> headers.addAll(httpHeaders));
+                if (HttpMethod.POST.equals(httpMethod)) {
+                    return requestBodySpec.body(BodyInserters.fromValue(requestBody)).exchangeToMono(response -> response.toEntity(String.class));
+                } else {
+                    return requestBodySpec.exchangeToMono(response -> response.toEntity(String.class));
+                }
+            } else {
+                WebClient.RequestBodySpec requestBodySpec = webClient.method(httpMethod).uri(targetUrl).acceptCharset(Charset.forName("UTF-8"))
+                        .accept(MediaType.APPLICATION_XML, MediaType.APPLICATION_XML).headers(headers -> headers.addAll(httpHeaders));
+                if (HttpMethod.POST.equals(httpMethod)) {
+                    return requestBodySpec.body(BodyInserters.fromValue(requestBody)).exchangeToMono(response -> response.toEntity(String.class));
+                } else {
+                    return requestBodySpec.exchangeToMono(response -> response.toEntity(String.class));
+                }
+            }
+        } else {
+            return null;
+        }
+
     }
 
     private String extractTargetSystemName(String apiPath) {
@@ -90,8 +126,8 @@ public class ProxyGatewayServiceImpl {
         return "";
     }
 
-    private String getTargetUrl(String targetSystemName) {
-        return proxyConfig.getRoutes().get(targetSystemName) ==null?"":proxyConfig.getRoutes().get(targetSystemName) ;
+    private Target getTargetUrl(String targetSystemName) {
+        return proxyConfig.getRoutes().get(targetSystemName);
     }
 
     private ExchangeFilterFunction logRequest() {
@@ -101,4 +137,5 @@ public class ProxyGatewayServiceImpl {
             return Mono.just(clientRequest);
         });
     }
+
 }

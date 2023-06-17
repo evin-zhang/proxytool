@@ -1,34 +1,41 @@
 package com.jdbr.proxytool.controllers;
 
+import com.jdbr.proxytool.services.ProxyGatewayService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import com.jdbr.proxytool.services.ProxyGatewayServiceImpl;
 
 @RestController
 @RequestMapping("/proxy")
+@Slf4j
 public class ProxyController {
-    private final ProxyGatewayServiceImpl proxyGatewayServiceImpl;
+    private final ProxyGatewayService proxyGatewayService;
 
     @Autowired
-    public ProxyController(ProxyGatewayServiceImpl proxyGatewayServiceImpl) {
-        this.proxyGatewayServiceImpl = proxyGatewayServiceImpl;
+    public ProxyController(ProxyGatewayService proxyGatewayService) {
+        this.proxyGatewayService = proxyGatewayService;
     }
 
-    @GetMapping("/forward")
-    public Mono<ResponseEntity<Object>> forwardGetRequest(
-            @RequestHeader("x-proxy-tool-api-path") String apiPath,
+    @RequestMapping(value = "/{target-system-name}/**",method={RequestMethod.GET,RequestMethod.POST})
+    public Mono<ResponseEntity<String>> proxyRequest(
+            @RequestBody(required=false) String requestBody,
+            @RequestParam MultiValueMap<String,String> params,
+            @PathVariable (name="target-system-name",required = true) String targetSystemName,
+            HttpMethod httpMethod,
+            ServerWebExchange exchange,
+            @RequestHeader HttpHeaders requestHeaders,
             @RequestHeader(value = "x-proxy-tool-cache", defaultValue = "Y") String cacheHeaderValue) {
-        return proxyGatewayServiceImpl.proxyRequest(apiPath, HttpMethod.GET, null, cacheHeaderValue);
+        String requestPath = exchange.getRequest().getPath().value();
+        String apiPath = requestPath.substring(requestPath.indexOf(targetSystemName)+targetSystemName.length());
+        log.debug(apiPath);
+        return proxyGatewayService.proxyRequest(apiPath,requestHeaders,params,targetSystemName,httpMethod,requestBody,cacheHeaderValue);
     }
 
-    @PostMapping("/forward")
-    public Mono<ResponseEntity<Object>> forwardPostRequest(
-            @RequestHeader("x-proxy-tool-api-path") String apiPath,
-            @RequestHeader(value = "x-proxy-tool-cache", defaultValue = "Y") String cacheHeaderValue,
-            @RequestBody(required = false) String requestBody) {
-        return proxyGatewayServiceImpl.proxyRequest(apiPath, HttpMethod.POST, requestBody, cacheHeaderValue);
-    }
 }
