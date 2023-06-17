@@ -1,5 +1,4 @@
 # proxytool
-# Proxy Controller
 
 This tool can be used as a mock server. When you don't want to manually configure a large amount of API mock data, you can use this proxy tool to cache the real request results and use them as mock data.
 ## Table of Contents
