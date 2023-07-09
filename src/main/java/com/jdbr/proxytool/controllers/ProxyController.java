@@ -10,7 +10,6 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
-import com.jdbr.proxytool.services.ProxyGatewayServiceImpl;
 
 @RestController
 @RequestMapping("/proxy")
@@ -27,7 +26,7 @@ public class ProxyController {
     public Mono<ResponseEntity<String>> proxyRequest(
             @RequestBody(required=false) String requestBody,
             @RequestParam MultiValueMap<String,String> params,
-            @PathVariable (name="target-system-name",required = true) String targetSystemName,
+            @PathVariable (name="target-system-name") String targetSystemName,
             HttpMethod httpMethod,
             ServerWebExchange exchange,
             @RequestHeader HttpHeaders requestHeaders,

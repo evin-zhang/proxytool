@@ -1,6 +1,6 @@
 package com.jdbr.proxytool.services;
-
 import com.jdbr.proxytool.config.Target;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -13,7 +13,7 @@ import reactor.core.publisher.Mono;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Objects;
 
@@ -25,10 +25,12 @@ import org.springframework.web.reactive.function.BodyInserters;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.transport.ProxyProvider;
 
-
 @Component
+@Slf4j
 public class ProxyGatewayServiceImpl implements ProxyGatewayService {
     private static final int CACHE_EXPIRATION_MINUTES = 10;
+
+    private static final String USE_PROXY = "Y";
     private final Cache<String, String> cache;
     private final ProxyConfig proxyConfig;
     private final WebClient webClient;
@@ -71,10 +73,10 @@ public class ProxyGatewayServiceImpl implements ProxyGatewayService {
     private String generateRequestKey(String apiPath, HttpMethod httpMethod, String requestBody) {
         String key;
         if (httpMethod == HttpMethod.POST) {
-            String payloadHash = Integer.toString(apiPath.hashCode()) + "_" + Integer.toString(requestBody.hashCode());
+            String payloadHash = apiPath.hashCode() + "_" + requestBody.hashCode();
             key = apiPath.hashCode() + "_" + payloadHash;
         } else {
-            key = apiPath.hashCode() + "";
+            key = String.valueOf(apiPath.hashCode());
 
 
         }
@@ -92,11 +94,11 @@ public class ProxyGatewayServiceImpl implements ProxyGatewayService {
         if (!Objects.isNull(target)) {
             String targetUrl = UriComponentsBuilder.fromUriString(target.getHost() + apiPath).queryParams(params).toUriString();
             String needProxy = target.getNeedProxy();
-            if ("Y".equals(needProxy)) {
+            if (USE_PROXY.equals(needProxy)) {
                 final ReactorClientHttpConnector connector =
                         new ReactorClientHttpConnector(HttpClient.create()
                                 .proxy(proxy -> proxy.type(ProxyProvider.Proxy.HTTP).host(target.getProxyHost()).port(Integer.parseInt(target.getProxyPort()))));
-                WebClient.RequestBodySpec requestBodySpec = WebClient.builder().filter(logRequest()).clientConnector(connector).build().method(httpMethod).uri(targetUrl).acceptCharset(Charset.forName("UTF-8"))
+                WebClient.RequestBodySpec requestBodySpec = WebClient.builder().filter(logRequest()).clientConnector(connector).build().method(httpMethod).uri(targetUrl).acceptCharset(StandardCharsets.UTF_8)
                         .accept(MediaType.APPLICATION_XML, MediaType.APPLICATION_XML).headers(headers -> headers.addAll(httpHeaders));
                 if (HttpMethod.POST.equals(httpMethod)) {
                     return requestBodySpec.body(BodyInserters.fromValue(requestBody)).exchangeToMono(response -> response.toEntity(String.class));
@@ -104,7 +106,7 @@ public class ProxyGatewayServiceImpl implements ProxyGatewayService {
                     return requestBodySpec.exchangeToMono(response -> response.toEntity(String.class));
                 }
             } else {
-                WebClient.RequestBodySpec requestBodySpec = webClient.method(httpMethod).uri(targetUrl).acceptCharset(Charset.forName("UTF-8"))
+                WebClient.RequestBodySpec requestBodySpec = webClient.method(httpMethod).uri(targetUrl).acceptCharset(StandardCharsets.UTF_8)
                         .accept(MediaType.APPLICATION_XML, MediaType.APPLICATION_XML).headers(headers -> headers.addAll(httpHeaders));
                 if (HttpMethod.POST.equals(httpMethod)) {
                     return requestBodySpec.body(BodyInserters.fromValue(requestBody)).exchangeToMono(response -> response.toEntity(String.class));
@@ -118,24 +120,16 @@ public class ProxyGatewayServiceImpl implements ProxyGatewayService {
 
     }
 
-    private String extractTargetSystemName(String apiPath) {
-        String[] pathSegments = apiPath.split("/");
-        if (pathSegments.length >= 2) {
-            return pathSegments[1];
-        }
-        return "";
-    }
+
 
     private Target getTargetUrl(String targetSystemName) {
         return proxyConfig.getRoutes().get(targetSystemName);
     }
-
     private ExchangeFilterFunction logRequest() {
         return ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
             // Log the request details if needed
-            System.out.println("Request: " + clientRequest.method() + " " + clientRequest.url());
+            log.debug("Request:{}" , clientRequest.method() + " " + clientRequest.url());
             return Mono.just(clientRequest);
         });
     }
-
 }
